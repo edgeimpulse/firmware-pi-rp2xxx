@@ -32,24 +32,12 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Include ----------------------------------------------------------------- */
-#include <stdint.h>
-#include <stdlib.h>
-
 #include "ei_sampler.h"
 #include "ei_config_types.h"
-#include "ei_device_raspberry_rp2040.h"
-
-#include "sensor_aq_mbedtls_hs256.h"
-
-
-/** @todo Should be called by function pointer */
-extern bool ei_inertial_sample_start(sampler_callback callback, float sample_interval_ms);
-extern int ei_inertial_read_data(void);
-
-extern void ei_printf(const char *format, ...);
-extern void ei_printf_float(float f);
-extern ei_config_t *ei_config_get_config();
+#include "ei_device_raspberry_rp2xxx.h"
+#include "firmware-sdk/sensor-aq/sensor_aq_none.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 /* Forward declarations ---------------------------------------------------- */
 static size_t ei_write(const void *buffer, size_t size, size_t count, EI_SENSOR_AQ_STREAM *);
@@ -69,15 +57,10 @@ static uint8_t write_word_buf[4];
 static int write_addr = 0;
 EI_SENSOR_AQ_STREAM stream;
 
-static unsigned char ei_mic_ctx_buffer[1024];
-static sensor_aq_signing_ctx_t ei_mic_signing_ctx;
-static sensor_aq_mbedtls_hs256_ctx_t ei_mic_hs_ctx;
-static sensor_aq_ctx ei_mic_ctx = {
-    { ei_mic_ctx_buffer, 1024 },
-    &ei_mic_signing_ctx,
-    &ei_write,
-    &ei_seek,
-    &ei_time,
+static unsigned char ei_samples_ctx_buffer[1024];
+static sensor_aq_signing_ctx_t ei_samples_signing_ctx;
+static sensor_aq_ctx ei_samples_ctx = {
+    { ei_samples_ctx_buffer, 1024 }, &ei_samples_signing_ctx, &ei_write, &ei_seek, &ei_time,
 };
 
 /**
@@ -93,8 +76,8 @@ static sensor_aq_ctx ei_mic_ctx = {
  */
 static size_t ei_write(const void *buffer, size_t size, size_t count, EI_SENSOR_AQ_STREAM *)
 {
-    EiDeviceInfo* dev = EiDeviceInfo::get_device();
-    EiDeviceMemory* mem = dev->get_memory();
+    EiDeviceInfo *dev = EiDeviceInfo::get_device();
+    EiDeviceMemory *mem = dev->get_memory();
     for (size_t i = 0; i < count; i++) {
         write_word_buf[write_addr & 0x3] = *((char *)buffer + i);
 
@@ -120,7 +103,8 @@ static int ei_seek(EI_SENSOR_AQ_STREAM *, long int offset, int origin)
 static time_t ei_time(time_t *t)
 {
     time_t cur_time = 4564867;
-    if (t) *(t) = cur_time;
+    if (t)
+        *(t) = cur_time;
     return cur_time;
 }
 
@@ -130,8 +114,8 @@ static time_t ei_time(time_t *t)
  */
 static void ei_write_last_data(void)
 {
-    EiDeviceInfo* dev = EiDeviceInfo::get_device();
-    EiDeviceMemory* mem = dev->get_memory();  
+    EiDeviceInfo *dev = EiDeviceInfo::get_device();
+    EiDeviceMemory *mem = dev->get_memory();
 
     uint8_t fill = ((uint8_t)write_addr & 0x03);
     uint8_t insert_end_address = 0;
@@ -148,7 +132,10 @@ static void ei_write_last_data(void)
     for (uint8_t i = 0; i < 4; i++) {
         write_word_buf[i] = 0xFF;
     }
-    mem->write_sample_data(write_word_buf, (write_addr & ~0x03) + headerOffset + insert_end_address, 4);
+    mem->write_sample_data(
+        write_word_buf,
+        (write_addr & ~0x03) + headerOffset + insert_end_address,
+        4);
 }
 
 /**
@@ -159,10 +146,13 @@ static void ei_write_last_data(void)
  *
  * @return     true if successful
  */
-bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_start, uint32_t sample_size)
+bool ei_sampler_start_sampling(
+    void *v_ptr_payload,
+    starter_callback ei_sample_start,
+    uint32_t sample_size)
 {
-    EiDeviceInfo* dev = EiDeviceInfo::get_device();
-    EiDeviceMemory* mem = dev->get_memory();  
+    EiDeviceInfo *dev = EiDeviceInfo::get_device();
+    EiDeviceMemory *mem = dev->get_memory();
 
     sensor_aq_payload_info *payload = (sensor_aq_payload_info *)v_ptr_payload;
 
@@ -176,7 +166,9 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     samples_required = (uint32_t)((float)dev->get_sample_length_ms());
     samples_required_increase = (uint32_t)dev->get_sample_interval_ms();
 
-    sample_buffer_size = ((uint32_t)((dev->get_sample_length_ms()) / dev->get_sample_interval_ms()) * sample_size) * 2;
+    sample_buffer_size =
+        ((uint32_t)((dev->get_sample_length_ms()) / dev->get_sample_interval_ms()) * sample_size) *
+        2;
     current_sample = 0;
 
     ei_printf("Samples req: %d\n", samples_required);
@@ -186,14 +178,15 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
         ei_printf("Starting in %d ms... (or until all flash was erased)\n", 2000);
         ei_sleep(2000);
         DEBUG_PRINT("Done waiting\n");
-    } 
+    }
     else {
-        ei_printf("Starting in %d ms... (or until all flash was erased)\n",
-                    ((sample_buffer_size / mem->block_size) + 1) * mem->block_erase_time);
+        ei_printf(
+            "Starting in %d ms... (or until all flash was erased)\n",
+            ((sample_buffer_size / mem->block_size) + 1) * mem->block_erase_time);
     }
 
     dev->set_state(eiStateErasingFlash);
-    if(mem->erase_sample_data(0, sample_buffer_size) != (sample_buffer_size)) {
+    if (mem->erase_sample_data(0, sample_buffer_size) != (sample_buffer_size)) {
         return false;
     }
     DEBUG_PRINT("Done erasing\n");
@@ -203,28 +196,30 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     }
     DEBUG_PRINT("Done header\n");
 
-    if(ei_sample_start(&sample_data_callback, dev->get_sample_interval_ms()) == false) {
+    if (ei_sample_start(&sample_data_callback, dev->get_sample_interval_ms()) == false) {
         return false;
     }
-    
-	ei_printf("Sampling...\n");    
 
-    while(current_sample < samples_required) {
+    ei_printf("Sampling...\n");
+
+    while (current_sample < samples_required) {
         dev->set_state(eiStateSampling);
     };
 
     ei_write_last_data();
-    write_addr++;   
+    write_addr++;
 
-    uint8_t final_byte[] = {0xff};
-    int ctx_err = ei_mic_ctx.signature_ctx->update(ei_mic_ctx.signature_ctx, final_byte, 1);
+    uint8_t final_byte[] = { 0xff };
+    int ctx_err = ei_samples_ctx.signature_ctx->update(ei_samples_ctx.signature_ctx, final_byte, 1);
     if (ctx_err != 0) {
         return ctx_err;
     }
 
     // finish the signing
     DEBUG_PRINT("Finish the signing \n");
-    ctx_err = ei_mic_ctx.signature_ctx->finish(ei_mic_ctx.signature_ctx, ei_mic_ctx.hash_buffer.buffer);
+    ctx_err = ei_samples_ctx.signature_ctx->finish(
+        ei_samples_ctx.signature_ctx,
+        ei_samples_ctx.hash_buffer.buffer);
 
     // load the first page in flash...
     uint8_t *page_buffer = (uint8_t *)ei_malloc(mem->block_size);
@@ -245,11 +240,11 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     }
 
     // update the hash
-    uint8_t *hash = ei_mic_ctx.hash_buffer.buffer;
+    uint8_t *hash = ei_samples_ctx.hash_buffer.buffer;
     // we have allocated twice as much for this data (because we also want to be able to represent
     // in hex) thus only loop over the first half of the bytes as the signature_ctx has written to
     // those
-    for (size_t hash_ix = 0; hash_ix < (ei_mic_ctx.hash_buffer.size / 2); hash_ix++) {
+    for (size_t hash_ix = 0; hash_ix < (ei_samples_ctx.hash_buffer.size / 2); hash_ix++) {
         // this might seem convoluted, but snprintf() with %02x is not always supported e.g. by
         // newlib-nano we encode as hex... first ASCII char encodes top 4 bytes
         uint8_t first = (hash[hash_ix] >> 4) & 0xf;
@@ -260,8 +255,8 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
         char first_c = first >= 10 ? 87 + first : 48 + first;
         char second_c = second >= 10 ? 87 + second : 48 + second;
 
-        page_buffer[ei_mic_ctx.signature_index + (hash_ix * 2) + 0] = first_c;
-        page_buffer[ei_mic_ctx.signature_index + (hash_ix * 2) + 1] = second_c;
+        page_buffer[ei_samples_ctx.signature_index + (hash_ix * 2) + 0] = first_c;
+        page_buffer[ei_samples_ctx.signature_index + (hash_ix * 2) + 1] = second_c;
     }
 
     j = mem->erase_sample_data(0, mem->block_size);
@@ -283,7 +278,7 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
     mem->flush_data();
     ei_sleep(100);
 
-    finish_and_upload((char*)dev->get_sample_label().c_str(), dev->get_sample_length_ms());
+    finish_and_upload((char *)dev->get_sample_label().c_str(), dev->get_sample_length_ms());
 
     return true;
 }
@@ -297,11 +292,11 @@ bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_s
  */
 static bool create_header(sensor_aq_payload_info *payload)
 {
-    EiDeviceInfo* dev = EiDeviceInfo::get_device();
-    EiDeviceMemory* mem = dev->get_memory();   
-    sensor_aq_init_mbedtls_hs256_context(&ei_mic_signing_ctx, &ei_mic_hs_ctx, dev->get_sample_hmac_key().c_str());
+    EiDeviceInfo *dev = EiDeviceInfo::get_device();
+    EiDeviceMemory *mem = dev->get_memory();
+    sensor_aq_init_none_context(&ei_samples_signing_ctx);
 
-    int tr = sensor_aq_init(&ei_mic_ctx, payload, NULL, true);
+    int tr = sensor_aq_init(&ei_samples_ctx, payload, NULL, true);
 
     if (tr != AQ_OK) {
         ei_printf("sensor_aq_init failed (%d)\n", tr);
@@ -310,8 +305,8 @@ static bool create_header(sensor_aq_payload_info *payload)
     // then we're gonna find the last byte that is not 0x00 in the CBOR buffer.
     // That should give us the whole header
     size_t end_of_header_ix = 0;
-    for (size_t ix = ei_mic_ctx.cbor_buffer.len - 1; ix >= 0; ix--) {
-        if (((uint8_t *)ei_mic_ctx.cbor_buffer.ptr)[ix] != 0x0) {
+    for (size_t ix = ei_samples_ctx.cbor_buffer.len - 1; ix >= 0; ix--) {
+        if (((uint8_t *)ei_samples_ctx.cbor_buffer.ptr)[ix] != 0x0) {
             end_of_header_ix = ix;
             break;
         }
@@ -323,7 +318,7 @@ static bool create_header(sensor_aq_payload_info *payload)
     }
 
     // Write to blockdevice
-    tr = mem->write_sample_data((uint8_t*)ei_mic_ctx.cbor_buffer.ptr, 0, end_of_header_ix);
+    tr = mem->write_sample_data((uint8_t *)ei_samples_ctx.cbor_buffer.ptr, 0, end_of_header_ix);
     DEBUG_PRINT("Try to write %d bytes\r\n", end_of_header_ix);
 
     if (tr != end_of_header_ix) {
@@ -331,7 +326,7 @@ static bool create_header(sensor_aq_payload_info *payload)
         return false;
     }
 
-    ei_mic_ctx.stream = &stream;
+    ei_samples_ctx.stream = &stream;
 
     headerOffset = end_of_header_ix;
     write_addr = 0;
@@ -350,7 +345,10 @@ static void finish_and_upload(char *filename, uint32_t sample_length_ms)
     ei_printf("Done sampling, total bytes collected: %u\n", samples_required);
     ei_printf("[1/1] Uploading file to Edge Impulse...\n");
 
-    ei_printf("Not uploading file, not connected to WiFi. Used buffer, from=%lu, to=%lu.\n", 0, write_addr + headerOffset);
+    ei_printf(
+        "Not uploading file, not connected to WiFi. Used buffer, from=%lu, to=%lu.\n",
+        0,
+        write_addr + headerOffset);
 
     ei_printf("[1/1] Uploading file to Edge Impulse OK (took %d ms.)\n", 200);
 
@@ -367,12 +365,12 @@ static void finish_and_upload(char *filename, uint32_t sample_length_ms)
  */
 static bool sample_data_callback(const void *sample_buf, uint32_t byteLenght)
 {
-    sensor_aq_add_data(&ei_mic_ctx, (float *)sample_buf, byteLenght / sizeof(float));
-    current_sample += samples_required_increase;    
+    sensor_aq_add_data(&ei_samples_ctx, (float *)sample_buf, byteLenght / sizeof(float));
+    current_sample += samples_required_increase;
 
-    if(current_sample > samples_required) {
+    if (current_sample > samples_required) {
         return true;
-    } 
+    }
     else {
         return false;
     }

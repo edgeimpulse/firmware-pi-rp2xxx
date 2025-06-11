@@ -33,16 +33,14 @@
  */
 
 /* Include ----------------------------------------------------------------- */
-#include <stdint.h>
-#include <stdlib.h>
-
+#include "ei_ultrasonicsensor.h"
 #include "Ultrasonic.h"
+#include "ei_device_raspberry_rp2xxx.h"
+#include "firmware-sdk/sensor-aq/sensor_aq.h"
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
-
-#include "ei_device_raspberry_rp2040.h"
-#include "ei_ultrasonicsensor.h"
-#include "firmware-sdk/sensor-aq/sensor_aq.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 /* Constant defines -------------------------------------------------------- */
 static float ultrasonic_data[ULTRASONIC_AXIS_SAMPLED];

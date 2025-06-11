@@ -35,17 +35,11 @@
 #ifndef EI_MICROPHONE_H
 #define EI_MICROPHONE_H
 
-/* Include ----------------------------------------------------------------- */
 #include <stdint.h>
-#include <stdbool.h>
 #include <stdlib.h>
 
-#include <PDM.h>
-
-#define SAMPLE_BUFFER_SIZE 256
-// Function prototypes 
+// Function prototypes
 bool ei_microphone_inference_start(uint32_t n_samples, float interval_ms);
-
 bool ei_microphone_sample_start(void);
 bool ei_microphone_inference_record(void);
 bool ei_microphone_inference_is_recording(void);

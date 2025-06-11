@@ -32,79 +32,79 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Include ----------------------------------------------------------------- */
-#include "tusb.h"
-#include <stdio.h>
-#include "pico/stdlib.h"
-
-#include <stdio.h>
-
-#include "ei_device_raspberry_rp2040.h"
-
+#include "FreeRTOS.h"
+#include "ei_accelerometer.h"
+#include "ei_analogsensor.h"
 #include "ei_at_handlers.h"
 #include "ei_classifier_porting.h"
-#include "ei_run_impulse.h"
-
+#include "ei_device_raspberry_rp2xxx.h"
 #include "ei_dht11sensor.h"
 #include "ei_inertialsensor.h"
-#include "ei_analogsensor.h"
+#include "ei_rp2xxx_internal_temperature.h"
+#include "ei_run_impulse.h"
 #include "ei_ultrasonicsensor.h"
-
-/* Kernel includes. */
-#include "FreeRTOS.h"
+#include "pico/multicore.h"
+#include "pico/stdlib.h"
 #include "task.h"
+#include <stdio.h>
+#include <time.h>
 
-EiDeviceInfo *EiDevInfo = dynamic_cast<EiDeviceInfo *>(EiDeviceRP2040::get_device());
+#if defined(RASPBERRYPI_PICO2_W) || defined(RASPBERRYPI_PICO_W)
+#include "pico/cyw43_arch.h"
+#pragma message("Including WiFi support for Raspberry Pi Pico 2 W")
+#endif
+
+EiDeviceInfo *EiDevInfo = dynamic_cast<EiDeviceInfo *>(EiDeviceRP2xxx::get_device());
 static ATServer *at;
-
-/* Prototypes for the standard FreeRTOS callback/hook functions implemented
-within this file. */
-extern "C" {
-void vApplicationMallocFailedHook(void);
-void vApplicationIdleHook(void);
-void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName);
-}
-/* Public functions -------------------------------------------------------- */
 
 void ei_init(void)
 {
-    EiDeviceRP2040* dev = static_cast<EiDeviceRP2040*>(EiDeviceRP2040::get_device());
+    EiDeviceRP2xxx *dev = static_cast<EiDeviceRP2xxx *>(EiDeviceRP2xxx::get_device());
+
+    ei_sleep(2000); // Wait for the serial port to be ready
 
     ei_printf(
-        "Hello from Edge Impulse Device SDK.\r\n"
+        "Hello from Edge Impulse\r\n"
         "Compiled on %s %s\r\n",
         __DATE__,
         __TIME__);
 
-    /* Setup the inertial sensor */
+    // Setup internal temperature sensor on RP2350/RP2040
+    ei_rp2xxxtemp_sensor_init();
+
+    // Setup ADXL345 Accelerometer
+    if (ei_accelerometer_init() == false) {
+        ei_printf("ADXL345 initialization failed");
+    }
+
+    // Setup the inertial sensor
     if (ei_inertial_sensor_init() == false) {
         ei_printf("Inertial sensor communication error occurred\r\n");
     }
 
-    /* Setup the temp&humidity sensor */
+    // Setup the temp&humidity sensor
     if (ei_dht11_sensor_init() == false) {
         ei_printf("DHT11 initialization failed\r\n");
     }
+    else {
+        ei_printf("DHT11 initialization successful");
+    }
 
-    /* Setup the ultrasonic sensor */
+    // Setup the ultrasonic sensor
     if (ei_ultrasonic_sensor_init() == false) {
         ei_printf("Ultrasonic ranger initialization failed\r\n");
     }
 
-    /* Setup the light sensor */
     if (ei_analog_sensor_init() == false) {
         ei_printf("ADC sensor initialization failed\r\n");
     }
 
-#ifdef DEBUG
-    //test_flash();
-#endif
-
-    // cannot init device id before main() started on RP2040
+    // cannot init device id before main() started on RP2XXX
     dev->init_device_id();
     dev->load_config();
     dev->set_state(eiStateFinished);
 
+    // init AT command parser
     at = ei_at_init(dev);
     ei_printf("Type AT+HELP to see a list of commands.\r\n");
     at->print_prompt();
@@ -112,12 +112,12 @@ void ei_init(void)
 
 void ei_main(void *pvParameters)
 {
-
     /* Initialize Edge Impulse sensors and commands */
     ei_init();
 
-    while(true) {
+    while (true) {
         /* handle command comming from uart */
+        ei_sleep(5);
         char data = ei_get_serial_byte();
 
         while (data != 0xFF) {
@@ -127,78 +127,59 @@ void ei_main(void *pvParameters)
     }
 }
 
-int main(void)
+/* To verify FreeRTOS is working across both Pico targets */
+void test_task(void *pvParameters)
 {
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    gpio_put(LED_PIN, 1);
+    while (1) {
+#if defined(RASPBERRYPI_PICO2_W) || defined(RASPBERRYPI_PICO_W)
 
-    stdio_init_all();
-    while (!tud_cdc_connected()) {
-        tight_loop_contents();
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1); // Turn LED on
+        sleep_ms(2050); // Wait for 2.05 seconds
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0); // Turn LED off
+        sleep_ms(1250); // Wait for 1.25 seconds
+
+#elif defined(RASPBERRYPI_PICO2) || defined(RASPBERRYPI_PICO)
+
+        gpio_put(PICO_DEFAULT_LED_PIN, 1);
+        sleep_ms(2050);
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        sleep_ms(1250);
+
+#endif
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Delay for 1 second before repeating
     }
-    
-    gpio_put(LED_PIN, 0);
+}
 
-    /* Start the two tasks as described in the comments at the top of this
-    file. */
-    xTaskCreate(ei_main,		/* The function that implements the task. */
-                "ei_main", 		/* The text name assigned to the task - for debug only as it is not used by the kernel. */
-                1024, 			/* The size of the stack to allocate to the task. */
-                NULL, 			/* The parameter passed to the task - not used in this case. */
-                (tskIDLE_PRIORITY + 1), 	/* The priority assigned to the task. */
-                NULL);			/* The task handle is not required, so NULL is passed. */
+void vLaunch(void)
+{
+    TaskHandle_t task;
+
+#if configUSE_CORE_AFFINITY && configNUMBER_OF_CORES > 1
+    // we must bind the main task to one core (well at least while the init is called)
+    vTaskCoreAffinitySet(task, 1);
+#endif
 
     /* Start the tasks and timer running. */
     vTaskStartScheduler();
-
-    while(1){ }
 }
 
-/*-----------------------------------------------------------*/
-
-void vApplicationMallocFailedHook(void)
+int main(void)
 {
-    /* Called if a call to pvPortMalloc() fails because there is insufficient
-    free memory available in the FreeRTOS heap.  pvPortMalloc() is called
-    internally by FreeRTOS API functions that create tasks, queues, software
-    timers, and semaphores.  The size of the FreeRTOS heap is set by the
-    configTOTAL_HEAP_SIZE configuration constant in FreeRTOSConfig.h. */
 
-    /* Force an assert. */
-    ei_printf("Malloc Failed\n");
-    configASSERT((volatile void*)NULL);
-}
-/*-----------------------------------------------------------*/
+    stdio_init_all();
 
-void vApplicationStackOverflowHook(TaskHandle_t pxTask, char *pcTaskName)
-{
-    (void)pcTaskName;
-    (void)pxTask;
+#ifdef RASPBERRYPI_PICO2_W
+    if (cyw43_arch_init()) {
+        ei_printf("Wi-Fi init failed\n");
+        return -1;
+    }
+#endif
 
-    /* Run time stack overflow checking is performed if
-    configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2.  This hook
-    function is called if a stack overflow is detected. */
+    xTaskCreate(ei_main, "ei_main", 1024, NULL, (tskIDLE_PRIORITY + 1), NULL);
 
-    /* Force an assert. */
-    ei_printf("Stack Overflow\n");
-    configASSERT((volatile void*)NULL);
-}
-/*-----------------------------------------------------------*/
+    vTaskStartScheduler();
 
-void vApplicationIdleHook( void )
-{
-    volatile size_t xFreeHeapSpace;
+    while (1) { }
 
-    /* This is just a trivial example of an idle hook.  It is called on each
-    cycle of the idle task.  It must *NOT* attempt to block.  In this case the
-    idle task just queries the amount of FreeRTOS heap that remains.  See the
-    memory management section on the http://www.FreeRTOS.org web site for memory
-    management options.  If there is a lot of heap memory free then the
-    configTOTAL_HEAP_SIZE value in FreeRTOSConfig.h can be reduced to free up
-    RAM. */
-    xFreeHeapSpace = xPortGetFreeHeapSize();
-
-    /* Remove compiler warning about xFreeHeapSpace being set but never used. */
-    (void)xFreeHeapSpace;
+    return 0;
 }

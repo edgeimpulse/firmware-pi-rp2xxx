@@ -39,20 +39,24 @@
 #include "ei_inertialsensor.h"
 #include <LSM6DSOX.h>
 
-#include "ei_device_raspberry_rp2040.h"
+#include "ei_device_raspberry_rp2xxx.h"
 #include "firmware-sdk/sensor-aq/sensor_aq.h"
 
 /* Constant defines -------------------------------------------------------- */
 #define CONVERT_G_TO_MS2 9.80665f
+#define ARDUINO_NANO_RP2040_SDA 12
+#define ARDUINO_NANO_RP2040_SCL 13
 
+/* Private variables ------------------------------------------------------- */
 static float imu_data[INERTIAL_AXIS_SAMPLED];
 
 bool ei_inertial_sensor_init(void)
 {
     uint8_t acc_type = IMU.begin();
-    if (!acc_type) { 
-        acc_type = IMU1.begin(); 
-        IMU = IMU1;
+    if (!acc_type) {
+        IMU.end();
+        IMU.customI2CPins(ARDUINO_NANO_RP2040_SDA, ARDUINO_NANO_RP2040_SCL);
+        acc_type = IMU.begin();
     }
 
     if (!acc_type) {
@@ -62,7 +66,7 @@ bool ei_inertial_sensor_init(void)
         DEBUG_PRINT("Using LSM6DSOX\n");
     }
     else if (acc_type == 2) {
-        DEBUG_PRINT("Using LSM6DS3\n");        
+        DEBUG_PRINT("Using LSM6DS3\n");
     }
 
     ei_add_sensor_to_fusion_list(inertial_sensor);

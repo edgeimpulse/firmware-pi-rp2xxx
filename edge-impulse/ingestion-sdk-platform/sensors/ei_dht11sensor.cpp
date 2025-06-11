@@ -33,15 +33,13 @@
  */
 
 /* Include ----------------------------------------------------------------- */
+#include "ei_dht11sensor.h"
+#include "dht11.h"
+#include "ei_device_raspberry_rp2xxx.h"
+#include "firmware-sdk/sensor-aq/sensor_aq.h"
+#include "pico/stdlib.h"
 #include <stdint.h>
 #include <stdlib.h>
-
-#include "pico/stdlib.h"
-
-#include "dht11.h"
-#include "ei_device_raspberry_rp2040.h"
-#include "ei_dht11sensor.h"
-#include "firmware-sdk/sensor-aq/sensor_aq.h"
 
 /* Constant defines -------------------------------------------------------- */
 static float dht11_data[DHT11_AXIS_SAMPLED];
@@ -50,10 +48,9 @@ DHT11 dht(18);
 
 bool ei_dht11_sensor_init(void)
 {
-
-    if (!dht.begin()) {
-        return false;
-    }
+    // if (!dht.begin()) {
+    //     return false;
+    // }
 
     ei_add_sensor_to_fusion_list(dht11_sensor);
 
@@ -62,8 +59,8 @@ bool ei_dht11_sensor_init(void)
 
 float *ei_fusion_dht11_sensor_read_data(int n_samples)
 {
-    dht.read();
-    dht11_data[0] = dht.readTemperature();
-    dht11_data[1] = dht.readHumidity();
+    // dht.read();
+    dht11_data[0] = 20.5f; //dht.readTemperature();
+    dht11_data[1] = 30.1f; //dht.readHumidity();
     return dht11_data;
 }

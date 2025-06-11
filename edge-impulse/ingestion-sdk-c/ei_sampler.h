@@ -37,10 +37,10 @@
 
 #include "ei_config_types.h"
 
-/** ei sampler callback function, call with sample data */
-typedef void (*reader_callback)();
-
 /* Function prototypes ----------------------------------------------------- */
-bool ei_sampler_start_sampling(void *v_ptr_payload, starter_callback ei_sample_start, uint32_t sample_size);
+bool ei_sampler_start_sampling(
+    void *v_ptr_payload,
+    starter_callback ei_sample_start,
+    uint32_t sample_size);
 
 #endif

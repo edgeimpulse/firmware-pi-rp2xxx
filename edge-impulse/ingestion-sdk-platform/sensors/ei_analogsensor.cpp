@@ -33,16 +33,14 @@
  */
 
 /* Include ----------------------------------------------------------------- */
-#include <stdint.h>
-#include <stdlib.h>
-
+#include "ei_analogsensor.h"
+#include "ei_device_raspberry_rp2xxx.h"
+#include "firmware-sdk/sensor-aq/sensor_aq.h"
 #include "hardware/adc.h"
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
-
-#include "ei_device_raspberry_rp2040.h"
-#include "ei_analogsensor.h"
-#include "firmware-sdk/sensor-aq/sensor_aq.h"
+#include <stdint.h>
+#include <stdlib.h>
 
 /* Constant defines -------------------------------------------------------- */
 static float analog_data[ANALOG_AXIS_SAMPLED];
@@ -61,7 +59,5 @@ bool ei_analog_sensor_init(void)
 float *ei_fusion_analog_sensor_read_data(int n_samples)
 {
     analog_data[0] = adc_read();
-    //light_data[0] = 1.0;
-
     return analog_data;
 }

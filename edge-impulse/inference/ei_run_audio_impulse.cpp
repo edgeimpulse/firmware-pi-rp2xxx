@@ -32,18 +32,18 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Include ----------------------------------------------------------------- */
 #include "model-parameters/model_metadata.h"
 
 #if defined(EI_CLASSIFIER_SENSOR) && EI_CLASSIFIER_SENSOR == EI_CLASSIFIER_SENSOR_MICROPHONE
 
 #include "edge-impulse-sdk/classifier/ei_run_classifier.h"
 #include "edge-impulse-sdk/dsp/numpy.hpp"
+#include "ei_device_raspberry_rp2xxx.h"
 #include "ei_microphone.h"
-#include "ei_device_raspberry_rp2040.h"
 #include "ei_run_impulse.h"
 
-typedef enum {
+typedef enum
+{
     INFERENCE_STOPPED,
     INFERENCE_WAITING,
     INFERENCE_SAMPLING,
@@ -61,39 +61,40 @@ static int samples_wr_index = 0;
 
 void ei_run_impulse(void)
 {
-    switch(state) {
-        case INFERENCE_STOPPED:
-            // nothing to do
+    switch (state) {
+    case INFERENCE_STOPPED:
+        // nothing to do
+        return;
+    case INFERENCE_WAITING:
+        if (ei_read_timer_ms() < (last_inference_ts + 2000)) {
             return;
-        case INFERENCE_WAITING:
-            if(ei_read_timer_ms() < (last_inference_ts + 2000)) {
-                return;
-            }
-            state = INFERENCE_SAMPLING;
-            ei_microphone_inference_reset_buffers();
-            break;
-        case INFERENCE_SAMPLING:
-            // wait for data to be collected through callback
-            if (ei_microphone_inference_is_recording()) {
-                return;
-            }
-            state = INFERENCE_DATA_READY;
-            break;
-            // nothing to do, just continue to inference provcessing below
-        case INFERENCE_DATA_READY:
-        default:
-            break;
+        }
+        state = INFERENCE_SAMPLING;
+        ei_microphone_inference_reset_buffers();
+        break;
+    case INFERENCE_SAMPLING:
+        // wait for data to be collected through callback
+        if (ei_microphone_inference_is_recording()) {
+            return;
+        }
+        state = INFERENCE_DATA_READY;
+        break;
+        // nothing to do, just continue to inference provcessing below
+    case INFERENCE_DATA_READY:
+    default:
+        break;
     }
 
     signal_t signal;
 
-    signal.total_length = continuous_mode ? EI_CLASSIFIER_SLICE_SIZE : EI_CLASSIFIER_RAW_SAMPLE_COUNT;
+    signal.total_length = continuous_mode ? EI_CLASSIFIER_SLICE_SIZE
+                                          : EI_CLASSIFIER_RAW_SAMPLE_COUNT;
     signal.get_data = &ei_microphone_inference_get_data;
 
     // run the impulse: DSP, neural network and the Anomaly algorithm
     ei_impulse_result_t result = { 0 };
     EI_IMPULSE_ERROR ei_error;
-    if(continuous_mode == true) {
+    if (continuous_mode == true) {
         ei_error = run_classifier_continuous(&signal, &result, debug_mode);
     }
     else {
@@ -104,8 +105,8 @@ void ei_run_impulse(void)
         return;
     }
 
-    if(continuous_mode == true) {
-        if(++print_results >= (EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW >> 1)) {
+    if (continuous_mode == true) {
+        if (++print_results >= (EI_CLASSIFIER_SLICES_PER_MODEL_WINDOW >> 1)) {
             display_results(&ei_default_impulse, &result);
             print_results = 0;
         }
@@ -114,7 +115,7 @@ void ei_run_impulse(void)
         display_results(&ei_default_impulse, &result);
     }
 
-    if(continuous_mode == true) {
+    if (continuous_mode == true) {
         state = INFERENCE_SAMPLING;
     }
     else {
@@ -127,7 +128,7 @@ void ei_run_impulse(void)
 void ei_start_impulse(bool continuous, bool debug, bool use_max_uart_speed)
 {
     const float sample_length = 1000.0f * static_cast<float>(EI_CLASSIFIER_RAW_SAMPLE_COUNT) /
-                        (1000.0f / static_cast<float>(EI_CLASSIFIER_INTERVAL_MS));
+        (1000.0f / static_cast<float>(EI_CLASSIFIER_INTERVAL_MS));
 
     continuous_mode = continuous;
     debug_mode = debug;
@@ -137,8 +138,10 @@ void ei_start_impulse(bool continuous, bool debug, bool use_max_uart_speed)
     ei_printf("\tInterval: %fms.\n", (float)EI_CLASSIFIER_INTERVAL_MS);
     ei_printf("\tFrame size: %d\n", EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE);
     ei_printf("\tSample length: %f ms.\n", sample_length);
-    ei_printf("\tNo. of classes: %d\n", sizeof(ei_classifier_inferencing_categories) /
-                                            sizeof(ei_classifier_inferencing_categories[0]));
+    ei_printf(
+        "\tNo. of classes: %d\n",
+        sizeof(ei_classifier_inferencing_categories) /
+            sizeof(ei_classifier_inferencing_categories[0]));
     ei_printf("Starting inferencing, press 'b' to break\n");
 
     if (continuous == true) {
@@ -152,30 +155,35 @@ void ei_start_impulse(bool continuous, bool debug, bool use_max_uart_speed)
         state = INFERENCE_SAMPLING;
     }
     else {
-        samples_per_inference = EI_CLASSIFIER_RAW_SAMPLE_COUNT * EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
+        samples_per_inference = EI_CLASSIFIER_RAW_SAMPLE_COUNT *
+            EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME;
         // it's time to prepare for sampling
         ei_printf("Starting inferencing in 2 seconds...\n");
         last_inference_ts = ei_read_timer_ms();
         state = INFERENCE_WAITING;
     }
 
-    if (ei_microphone_inference_start(continuous_mode ? EI_CLASSIFIER_SLICE_SIZE : EI_CLASSIFIER_RAW_SAMPLE_COUNT, EI_CLASSIFIER_INTERVAL_MS) == false) {
-        ei_printf("ERR: Could not allocate audio buffer (size %d), this could be due to the window length of your model\r\n", EI_CLASSIFIER_RAW_SAMPLE_COUNT);
+    if (ei_microphone_inference_start(
+            continuous_mode ? EI_CLASSIFIER_SLICE_SIZE : EI_CLASSIFIER_RAW_SAMPLE_COUNT,
+            EI_CLASSIFIER_INTERVAL_MS) == false) {
+        ei_printf(
+            "ERR: Could not allocate audio buffer (size %d), this could be due to the window "
+            "length of your model\r\n",
+            EI_CLASSIFIER_RAW_SAMPLE_COUNT);
         return;
     }
 
-    while(!ei_user_invoke_stop()) {
+    while (!ei_user_invoke_stop()) {
         ei_run_impulse();
         ei_sleep(1);
     }
 
     ei_stop_impulse();
-
 }
 
 void ei_stop_impulse(void)
 {
-    if(state != INFERENCE_STOPPED) {
+    if (state != INFERENCE_STOPPED) {
         ei_printf("Inferencing stopped by user\r\n");
         // EiDevice.set_state(eiStateFinished);
         /* reset samples buffer */
